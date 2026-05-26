@@ -592,3 +592,10 @@ else:
         )
     else:
         print(f"   no run today    workers: 0/{max_workers} idle")
+
+# ───── sentry hint (locked one-liner) ─────
+# Deliberately quiet — just enough to remind that constant updates are an
+# option. The leading two-space indent + en-dash bullet keeps it visually
+# subordinate to the `▎Health` line above.
+print()
+print("   – tip · /super-board sentry for live alerts and a 15-min heartbeat")

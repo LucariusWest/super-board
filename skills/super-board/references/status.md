@@ -96,6 +96,8 @@ mode:   <auto-merge|human-approves>        truth gate: <off|non-trivial (≥N)|a
 
 ▎Health
    last tick: <time>    run started: <time>    workers: <a>/<m>    worktrees cleaned: <n>
+
+   – tip · /super-board sentry for live alerts and a 15-min heartbeat
 ```
 
 ### Sample render (today's live NSAdashboard board)
@@ -145,6 +147,8 @@ mode:   auto-merge                 truth gate: non-trivial (≥70)
 
 ▎Health
    last tick: 93s ago    run started: 67m ago    workers: 2/3    worktrees cleaned: 5
+
+   – tip · /super-board sentry for live alerts and a 15-min heartbeat
 ```
 
 ---
