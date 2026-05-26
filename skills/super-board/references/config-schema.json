@@ -95,5 +95,39 @@
     // installed on the repo) or the user's own GitHub login (solo projects).
     // Pick during step 2 based on what `gh auth status` returned.
     "bot_identity": "auto"
+  },
+
+  // How the dispatcher spawns each headless `claude -p` worker.
+  // Asked during onboard. Per-project so contributors can choose what they
+  // accept. Defaults are safe (auto + the standard worker-settings.json).
+  "worker": {
+    // Maps to the claude -p permission flag.
+    //   "auto"  → --permission-mode auto.
+    //             Permission classifier inspects each tool call and may block
+    //             destructive ops (rm -rf, supabase db push with DROP COLUMN,
+    //             force push, etc.). The worker treats a block as a hard fail
+    //             and surfaces it as a Block/Skip exit per block-template.md.
+    //             Safer default — recommended for shared/team/prod-adjacent repos.
+    //   "skip"  → --dangerously-skip-permissions.
+    //             NO permission prompts. Workers can run anything the shell can.
+    //             Only use when:
+    //               (a) the work is on a solo dev machine you trust,
+    //               (b) the repo is git-versioned so mistakes are recoverable,
+    //               (c) you accept that this is the contract — there is no
+    //                   parallel safety layer. If you need OS-level gates on
+    //                   destructive ops, pick "auto" instead.
+    //             Practical effect: ~30s faster per worker (no classifier
+    //                   latency), and operations like `supabase db push` run
+    //                   without OS-level prompts. The trade-off is real: a
+    //                   bad migration WILL hit prod data. Your safety net is
+    //                   git revert (for code) and Supabase backups (for data).
+    "permission_mode": "auto",
+
+    // Path passed to claude -p --settings for per-project allow/deny rules.
+    // Default file ships with two pre-authorized commands (`gh pr ready *`,
+    // `gh pr merge *`) so the Reviewer doesn't stall on auto-merge prompts.
+    // Set to "" or null to omit the flag entirely (rare — only useful when
+    // permission_mode is "skip" AND you have no other project-specific allows).
+    "settings_file": ".claude/super-board/worker-settings.json"
   }
 }

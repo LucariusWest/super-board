@@ -47,6 +47,34 @@ TICK_SECONDS=$(jq -r '.tick_seconds // 120' "$CONFIG_PATH")
 MAX_WORKERS=$(jq -r '.max_workers // 3' "$CONFIG_PATH")
 BOT_LOGIN=$(jq -r '.notifications.bot_identity // .bot_identity // ""' "$CONFIG_PATH")
 
+# Worker spawn flags — configurable per project.
+# `permission_mode`: "auto" → --permission-mode auto (classifier gates each tool call;
+#                              destructive ops surface as Block exits).
+#                    "skip" → --dangerously-skip-permissions (no gating; faster, riskier).
+# `settings_file`:   passed to claude -p --settings for per-project allow/deny lists.
+#                    Set to "" to omit the flag entirely.
+PERMISSION_MODE=$(jq -r '.worker.permission_mode // "auto"' "$CONFIG_PATH")
+WORKER_SETTINGS_FILE=$(jq -r '.worker.settings_file // ".claude/super-board/worker-settings.json"' "$CONFIG_PATH")
+
+case "$PERMISSION_MODE" in
+  auto)
+    WORKER_PERM_FLAG="--permission-mode auto"
+    ;;
+  skip)
+    WORKER_PERM_FLAG="--dangerously-skip-permissions"
+    ;;
+  *)
+    echo "config error: worker.permission_mode must be 'auto' or 'skip', got: $PERMISSION_MODE" >&2
+    exit 65
+    ;;
+esac
+
+# --settings is optional; build the flag fragment iff a file path was supplied.
+WORKER_SETTINGS_FLAG=""
+if [ -n "$WORKER_SETTINGS_FILE" ] && [ "$WORKER_SETTINGS_FILE" != "null" ]; then
+  WORKER_SETTINGS_FLAG="--settings $WORKER_SETTINGS_FILE"
+fi
+
 RUN_DATE=$(date +%Y-%m-%d)
 RUN_MANIFEST="docs/super-board/runs/${RUN_DATE}-${CONFIG_SLUG}.md"
 INFLIGHT_DIR=".claude/super-board/inflight"
@@ -154,13 +182,53 @@ dispatch_lane() {
   if ! try_claim_assignee "$issue"; then
     return 0
   fi
+  # ── Fix #2 (2026-05-25): give workers an explicit exit contract.
+  # Old prompt was a one-liner with no current-state info, so workers spun on cards
+  # already past their lane's source column. New prompt embeds the dispatcher's view
+  # of the card and tells the worker to no-op-and-exit when its work is already done.
+  local lane_skill source_cols target_col lifecycle current_col current_col_display worker_log
   case "$lane" in
-    build)  prompt="Run super-build on issue #${issue} for super-board run. Read .claude/skills/super-board/references/run.md → Builder lifecycle. Config: ${CONFIG_PATH}." ;;
-    qa)     prompt="Run super-qa on issue #${issue} for super-board run. Read .claude/skills/super-board/references/run.md → Tester lifecycle. Config: ${CONFIG_PATH}." ;;
-    review) prompt="Run super-review on issue #${issue} for super-board run. Read .claude/skills/super-board/references/run.md → Reviewer lifecycle. Config: ${CONFIG_PATH}." ;;
+    build)  lane_skill="super-build";  source_cols="Ready, Building"; target_col="QA";     lifecycle="Builder"  ;;
+    qa)     lane_skill="super-qa";     source_cols="QA";              target_col="Review"; lifecycle="Tester"   ;;
+    review) lane_skill="super-review"; source_cols="Review";          target_col="Done";   lifecycle="Reviewer" ;;
     *) log "unknown lane: $lane"; return 1 ;;
   esac
-  nohup claude -p "$prompt" >/dev/null 2>&1 &
+  current_col=$(issue_status "$issue")
+  current_col_display="${current_col:-unknown}"
+  IFS= read -r -d '' prompt <<EOF || true
+Run $lane_skill on issue #${issue} for super-board run.
+
+CURRENT STATE (as seen by dispatcher):
+- Lane: $lane ($lifecycle)
+- Card current column: $current_col_display
+- Expected source column(s): $source_cols
+- Expected target column on success: $target_col
+- Config: $CONFIG_PATH
+
+EXIT CONTRACT (CRITICAL — read before doing anything):
+- If the card is NOT currently in one of [$source_cols], your lane's work is already done.
+  Write ONE short comment on issue #${issue}: "super-board $lifecycle no-op (card in $current_col_display)" and EXIT IMMEDIATELY.
+- If you complete the lifecycle: write the handoff comment(s), move the card to $target_col, release the assignee, then EXIT IMMEDIATELY.
+- DO NOT linger after the card move. DO NOT poll for next steps. DO NOT re-verify the move via extra gh calls.
+- The parent dispatcher handles all next-step dispatch; your job is one-shot.
+
+Read .claude/skills/super-board/references/run.md ($lifecycle lifecycle) for the full contract.
+EOF
+  # ── Fix #1 (2026-05-25): launch flags that prevent worker hangs and restore visibility.
+  # - $WORKER_PERM_FLAG       : either --permission-mode auto (classifier gates each tool call)
+  #                              or --dangerously-skip-permissions (no gating; faster, riskier).
+  #                              Picked by config.worker.permission_mode in super-board-run.sh top.
+  # - $WORKER_SETTINGS_FLAG   : optional --settings <file> for per-project allow/deny lists.
+  # - --max-turns 250           : forward-compatible turn cap (silently ignored on v2.1.150 but harmless)
+  # - </dev/null                : explicit stdin close; nohup on macOS does NOT redirect stdin
+  # - >>worker.log              : per-worker log so we can debug instead of flying blind
+  mkdir -p .claude/super-board/logs
+  worker_log=".claude/super-board/logs/worker-${lane}-${issue}-$(date +%Y%m%d-%H%M%S).log"
+  nohup claude -p \
+    $WORKER_PERM_FLAG \
+    $WORKER_SETTINGS_FLAG \
+    --max-turns 250 \
+    "$prompt" </dev/null >>"$worker_log" 2>&1 &
   pid=$!
   # v1.3.0+ lock format: bash-assignment style so `super-board stop` can source it
   # to recover lane + dispatch time. issue_locked()/reap_finished_locks() still work

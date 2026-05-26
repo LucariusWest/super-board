@@ -121,6 +121,38 @@ Progress: 🛠 onboard (you are here)  →  🧹 lint  →  🤖 run
 10. RECORD NOTIFICATION CHANNEL
     └─ Auto-detect from the current session; allow override.
 
+10b. PICK WORKER PERMISSION MODE (always asked)
+    ├─ "How should headless workers handle permission prompts?"
+    │      auto   (default; recommended) → claude -p --permission-mode auto
+    │              The permission classifier gates each tool call. Destructive
+    │              ops (rm -rf, supabase db push DROP COLUMN, force push, etc.)
+    │              get blocked at the OS level; the worker self-reports a Block
+    │              exit per block-template.md. ~30s/worker classifier overhead.
+    │      skip   (faster, riskier)      → claude -p --dangerously-skip-permissions
+    │              No OS-level prompts. Workers can run anything the shell can.
+    │              Sensible ONLY when: (a) solo dev machine you trust,
+    │              (b) repo is git-versioned so mistakes are recoverable,
+    │              (c) you accept this is the contract — no parallel safety
+    │              layer. Bad SQL WILL hit prod data; backups are your net.
+    │              Saves ~30s/worker and lets ops like `supabase db push`
+    │              proceed without classifier prompts. If you want OS-level
+    │              gates on destructive ops, pick "auto".
+    ├─ ⚠️ WARN if base_branch was production-detected in step 8 AND user picks
+    │      "skip": "Auto-merge to production AND skipping permission gates is
+    │      a lot of trust. Reconsider? [stay on skip / switch to auto]"
+    ├─ Save to config.worker.permission_mode.
+    ├─ Save default settings file path to config.worker.settings_file:
+    │      .claude/super-board/worker-settings.json (gitignored, per-machine).
+    │      Create the file with default contents if it doesn't exist:
+    │      {
+    │        "permissions": {
+    │          "allow": ["Bash(gh pr ready *)", "Bash(gh pr merge *)"]
+    │        }
+    │      }
+    └─ Reasoning: "Each project picks its own mode. If this skill gets imported
+        by someone else on another machine, they answer this question again for
+        their own config — your choice doesn't leak."
+
 11. WRITE CONFIG + ACTIVE POINTER
     ├─ Generate `description` (short, scannable)
     ├─ Record notifications.bot_identity — either `super-board-bot[bot]`
@@ -143,18 +175,18 @@ Progress: 🛠 onboard (you are here)  →  🧹 lint  →  🤖 run
 
 Every onboard step that touches GitHub or the filesystem has a defined recovery path. The user never gets a raw `gh` stack trace — they get a friendly diagnosis and the exact next command.
 
-| Step | Failure mode | What the user sees |
-|---|---|---|
-| 2. gh auth | Not logged in | `🔑 You're not signed in to GitHub. Run: \`gh auth login\` — then re-run super-board onboard.` |
-| 2. gh auth | Scope refused (user said no on browser) | `🔑 GitHub asked for project,read:project,repo scopes and you said no. Without them I can't read or move project cards. Re-run: \`gh auth refresh -s project,read:project,repo\`.` |
-| 3. git init | User declined | Halt with: `🛑 super-board needs a git repo. Re-run when ready.` |
-| 4. gh repo create | Quota/perm denied | `📦 GitHub refused to create the repo (org admin required, or you hit your free-repo quota). Options: (a) pick an existing repo, (b) create one in the web UI then re-run, (c) skip repo and run URL-only.` |
-| 5. gh project create | Org project denied | `🔑 You don't have permission to create projects under <org>. Either ask an org admin, or pick your personal account: \`gh project create --owner @me\`.` |
-| 5. gh project pick | Project deleted between list + pick | `📋 That project was deleted after I listed it. Reloading…` then auto-retry. |
-| 6. column create | Column add denied (read-only project) | `🔑 Project is read-only for your account. Either get write access, or pick a different project.` |
-| 7. PROJECT.md autogen | Sub-agent timeout / empty draft | `📝 Couldn't auto-draft PROJECT.md. Skip for now, or write one paragraph and I'll seed from that.` |
-| 8. base branch | gh API rate limit on protection-rule lookup | Soft-fail production detection, warn the user, fall back to asking. Do not halt. |
-| 11. write config | File system not writable | Halt with the exact path: `🛑 Can't write to .claude/super-board/configs/<slug>.json — check permissions.` |
+| Step                  | Failure mode                                | What the user sees                                                                                                                                                                                          |
+| --------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2. gh auth            | Not logged in                               | `🔑 You're not signed in to GitHub. Run: \`gh auth login\` — then re-run super-board onboard.`                                                                                                              |
+| 2. gh auth            | Scope refused (user said no on browser)     | `🔑 GitHub asked for project,read:project,repo scopes and you said no. Without them I can't read or move project cards. Re-run: \`gh auth refresh -s project,read:project,repo\`.`                          |
+| 3. git init           | User declined                               | Halt with: `🛑 super-board needs a git repo. Re-run when ready.`                                                                                                                                            |
+| 4. gh repo create     | Quota/perm denied                           | `📦 GitHub refused to create the repo (org admin required, or you hit your free-repo quota). Options: (a) pick an existing repo, (b) create one in the web UI then re-run, (c) skip repo and run URL-only.` |
+| 5. gh project create  | Org project denied                          | `🔑 You don't have permission to create projects under <org>. Either ask an org admin, or pick your personal account: \`gh project create --owner @me\`.`                                                   |
+| 5. gh project pick    | Project deleted between list + pick         | `📋 That project was deleted after I listed it. Reloading…` then auto-retry.                                                                                                                                |
+| 6. column create      | Column add denied (read-only project)       | `🔑 Project is read-only for your account. Either get write access, or pick a different project.`                                                                                                           |
+| 7. PROJECT.md autogen | Sub-agent timeout / empty draft             | `📝 Couldn't auto-draft PROJECT.md. Skip for now, or write one paragraph and I'll seed from that.`                                                                                                          |
+| 8. base branch        | gh API rate limit on protection-rule lookup | Soft-fail production detection, warn the user, fall back to asking. Do not halt.                                                                                                                            |
+| 11. write config      | File system not writable                    | Halt with the exact path: `🛑 Can't write to .claude/super-board/configs/<slug>.json — check permissions.`                                                                                                  |
 
 Every onboard halt comment includes (a) what the bot tried, (b) what failed, (c) the exact command or click the user can do, (d) how to resume (always: "re-run `super-board onboard`").
 
