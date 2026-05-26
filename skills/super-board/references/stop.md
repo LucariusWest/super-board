@@ -2,7 +2,7 @@
 
 Pointer: spec `docs/superpowers/specs/2026-05-21-super-board-design.md` §9 (added in v1.3.0).
 
-**Where it runs:** interactive orchestrator. Spawns the headless `scripts/super-board-stop.sh` synchronously, reports the summary, exits. No background processes.
+**Where it runs:** interactive orchestrator. Spawns the headless `.claude/bin/super-board-stop.sh` synchronously, reports the summary, exits. No background processes.
 
 ## What stop does — the one-line version
 
@@ -22,11 +22,11 @@ Progress: ✅ onboard  →  ✅ run  →  🛑 stop (you are here)
 
 ## Preconditions
 
-| Check | Action on fail |
-|---|---|
-| Active config exists (arg or `.claude/super-board/active`) | Exit 64: usage hint |
-| Config file readable | Exit 66: "config not found" |
-| `gh auth` valid | Continue anyway — comments may fail, kills still work |
+| Check                                                      | Action on fail                                        |
+| ---------------------------------------------------------- | ----------------------------------------------------- |
+| Active config exists (arg or `.claude/super-board/active`) | Exit 64: usage hint                                   |
+| Config file readable                                       | Exit 66: "config not found"                           |
+| `gh auth` valid                                            | Continue anyway — comments may fail, kills still work |
 
 Nothing else. Stop is intentionally tolerant — its job is to bring the system to rest, not to enforce policy.
 
@@ -94,18 +94,18 @@ Resume cost: **one lane cycle per previously-in-flight card** (Builder ~5min, Te
 Per the cardinal orchestrator/worker rule:
 
 1. Verify `.claude/super-board/active` exists OR a slug was provided.
-2. Run `scripts/super-board-stop.sh <slug>` synchronously (it's fast — seconds, not minutes).
+2. Run `.claude/bin/super-board-stop.sh <slug>` synchronously (it's fast — seconds, not minutes).
 3. Pass through the script's summary to the user.
 4. **Do not** retry kills, do not chase down zombies the script missed, do not "while you're at it" clean up worktrees or branches. If the script reported failures, surface them and wait for explicit user direction.
 
 ## Failure modes + recovery
 
-| Symptom | Cause | Recovery |
-|---|---|---|
-| `gh issue comment` fails | gh auth expired or network blip | Comments are best-effort. The kill + lock cleanup still happens. Manually note the stop in the issue later if needed. |
-| Assignee release fails (gh 403) | rate limit or auth | The next `super-board run` startup runs `reap_finished_locks` which sweeps stale assignees idempotently. No manual action needed. |
-| Worker PID survives SIGKILL | extremely rare (kernel-level stuck process) | `ps aux \| grep claude -p` to confirm, then escalate via OS tools. |
-| Stop reports "nothing to stop" but `ps` shows live workers | dispatcher and workers were started by a different repo / different inflight dir | Run stop in the right repo OR `pkill -f 'super-board-run\.sh'` manually + `pkill -f 'claude -p .*super-board'`. |
+| Symptom                                                    | Cause                                                                            | Recovery                                                                                                                          |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `gh issue comment` fails                                   | gh auth expired or network blip                                                  | Comments are best-effort. The kill + lock cleanup still happens. Manually note the stop in the issue later if needed.             |
+| Assignee release fails (gh 403)                            | rate limit or auth                                                               | The next `super-board run` startup runs `reap_finished_locks` which sweeps stale assignees idempotently. No manual action needed. |
+| Worker PID survives SIGKILL                                | extremely rare (kernel-level stuck process)                                      | `ps aux \| grep claude -p` to confirm, then escalate via OS tools.                                                                |
+| Stop reports "nothing to stop" but `ps` shows live workers | dispatcher and workers were started by a different repo / different inflight dir | Run stop in the right repo OR `pkill -f 'super-board-run\.sh'` manually + `pkill -f 'claude -p .*super-board'`.                   |
 
 ## Lock file format (v1.3.0+)
 

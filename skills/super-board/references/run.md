@@ -2,14 +2,14 @@
 
 Pointer: spec `docs/superpowers/specs/2026-05-21-super-board-design.md` §7 "Verb 3 — super-board run".
 
-**Where it runs:** headless. Spawned as a `nohup`-backgrounded process; the current Claude session exits immediately after dispatch. The runner script (`scripts/super-board-run.sh`) is a pure shell while-loop that dispatches one `claude -p` worker per lane and never holds Claude session state. Each `claude -p` worker is its own short-lived headless context — load this file at the start of every lane.
+**Where it runs:** headless. Spawned as a `nohup`-backgrounded process; the current Claude session exits immediately after dispatch. The runner script (`.claude/bin/super-board-run.sh`) is a pure shell while-loop that dispatches one `claude -p` worker per lane and never holds Claude session state. Each `claude -p` worker is its own short-lived headless context — load this file at the start of every lane.
 
 ## Orchestrator delegation contract (NON-NEGOTIABLE)
 
 **Super-board is an autonomous trader. The interactive Claude session that invokes `super-board run` is an orchestrator, NOT a worker.** Its only jobs are:
 
 1. Verify preconditions (see table below).
-2. Spawn the headless `nohup ./scripts/super-board-run.sh <slug> &` runner.
+2. Spawn the headless `nohup ./.claude/bin/super-board-run.sh <slug> &` runner.
 3. Report runner PID + log path back to the user.
 4. Exit.
 
@@ -462,7 +462,7 @@ Records: config used, variant, columns, target, per-card history (claim → comp
 
 Workers share the dispatcher's gh-auth token bucket. The dispatcher's `gh_rate_guard` does NOT protect worker traffic. Every worker MUST follow `rate-limit-etiquette.md` (in this directory):
 
-- Source `scripts/super-board-gh-guard.sh` at worker start.
+- Source `.claude/bin/super-board-gh-guard.sh` at worker start.
 - Call `sb_gh_guard_check 200` before any burst of gh calls (thread reads, sub-agent spawn, exit verification).
 - Adversarial sub-agents are capped at 50 gh calls each — prefer `git blame` (local) over `gh api graphql`.
 - Final PR handoff comment MUST include `gh-quota-on-exit: graphql=<n>/5000 rest=<n>/5000` (use `sb_gh_guard_summary`).
