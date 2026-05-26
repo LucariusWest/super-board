@@ -21,7 +21,7 @@ the board and surfaces only the events that matter:
   dispatched, worker reaped, PR merged, run started/stopped, block-rate
   alert, sentry-side gh outage.
 - **Full status snapshot every 15 minutes** as a rolling anchor — same output
-  as `scripts/super-board-status.sh`.
+  as `.claude/bin/super-board-status.py`.
 
 Quiet ticks emit nothing. Pure signal.
 
@@ -33,8 +33,8 @@ stays warm under the 5-min TTL. There is **no headless dispatcher process**;
 sentry is the orchestrator, not a forked worker.
 
 The tick work — manifest delta parsing, column-count diff, alert rendering —
-is delegated to `scripts/super-board-sentry.sh` (added 2026-05-26, same
-shell + Python pattern as `super-board-status.sh`).
+is delegated to `.claude/bin/super-board-sentry.py` (added 2026-05-26, pure
+Python stdlib + `gh`, same renderer shape as `super-board-status.py`).
 
 ## Intro shown when sentry starts
 
@@ -92,15 +92,15 @@ keys (the script matches them lowercase): `merged`, `blocked`, `dispatch`,
 
 **Step 2 — baseline status snapshot (EVERY entry, not just first-run):**
 
-Print `scripts/super-board-status.sh <slug>` stdout verbatim. This is your
-anchor on every sentry entry — first-run, resume after Ctrl-C, or
+Print `python .claude/bin/super-board-status.py <slug>` stdout verbatim. This is
+your anchor on every sentry entry — first-run, resume after Ctrl-C, or
 `--reconfigure`. Don't skip it; the user opening sentry mode always wants
 to see the board state right now, not wait up to 15 min for the first
 heartbeat.
 
 **Step 3 — state file init or load:**
 
-- State file missing → `scripts/super-board-sentry.sh --first-run <slug>`
+- State file missing → `python .claude/bin/super-board-sentry.py --first-run <slug>`
   seeds it. The script is silent in this mode (just emits
   `__NEXT_TICK_SECONDS__`).
 - State file present → no init call needed; the next tick will read it.
@@ -129,7 +129,7 @@ orchestrator on each tick:
 
 1. Verifies the active config still exists. If not, halt with the same
    error as `status`: `Run super-board onboard first.`
-2. Runs `scripts/super-board-sentry.sh <slug>`.
+2. Runs `python .claude/bin/super-board-sentry.py <slug>`.
 3. Parses stdout line-by-line:
    - Lines starting with `TELEGRAM:<event_key>:<message>` — strip the
      prefix, post the message via `mcp__plugin_telegram_telegram__reply`
@@ -173,7 +173,7 @@ To reset sentry's memory (e.g. after a long pause), the user deletes
 
 | Situation                                         | Behavior                                                                                                                                                                                                          |
 | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `super-board run` not active                      | Heartbeat snapshot still works (super-board-status.sh handles §H — "no active run" itself). Alert ticks stay quiet until a run starts.                                                                            |
+| `super-board run` not active                      | Heartbeat snapshot still works (super-board-status.py handles §H — "no active run" itself). Alert ticks stay quiet until a run starts.                                                                            |
 | Manifest missing for today                        | Treated as offset 0. Nothing to parse until the first manifest line lands.                                                                                                                                        |
 | Date rollover at midnight                         | The script detects the filename change, resets `last_manifest_byte_offset` to 0, reads the new file from the start.                                                                                               |
 | `gh` call fails                                   | Script catches it, increments `gh_failure_streak` in the state file. On the 3rd consecutive failure, a one-time `⚠ SENTRY: GH UNAVAILABLE` alert prints. Successful tick resets the streak.                       |

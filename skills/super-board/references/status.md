@@ -10,15 +10,17 @@
 
 ## ⚡ Fast path — prefer this
 
-If `scripts/super-board-status.sh` exists in the project (added 2026-05-26 to
-fix the multi-minute model-render path), **run it and print stdout verbatim**.
-Skip everything below in this file — the script implements the same locked
-template, just ~150× faster (≈1.3 s vs. ≈3 min) because rendering happens in
-shell + Python instead of token-by-token generation.
+If `.claude/bin/super-board-status.py` exists (installed by `install.sh`,
+added 2026-05-26 to fix the multi-minute model-render path), **run it and
+print stdout verbatim**. Skip everything below in this file — the script
+implements the same locked template, just ~150× faster (≈1.3 s vs. ≈3 min)
+because rendering is a single Python pass instead of token-by-token model
+generation. Pure Python 3 stdlib + `gh` CLI; no `jq`, no bash — runs on
+macOS, Linux, and Windows alike.
 
 ```bash
-scripts/super-board-status.sh                    # sole-config or active marker
-scripts/super-board-status.sh <config-slug>      # multi-project repo
+python .claude/bin/super-board-status.py                # sole-config or active marker
+python .claude/bin/super-board-status.py <config-slug>  # multi-project repo
 ```
 
 Exit codes the orchestrator should respect:
@@ -30,7 +32,7 @@ Exit codes the orchestrator should respect:
 
 The script enforces the same read-only contract as the rest of this file
 (no `gh ... edit/create/delete`, no GraphQL mutations). If you want to verify
-that for a given invocation: `grep -E 'gh (issue|pr|project) (edit|create|delete)|mutation {' scripts/super-board-status.sh` — should return nothing.
+that for a given invocation: `grep -E 'gh ?\.api\.(issue|pr|project) (edit|create|delete)|mutation {|gh.*(edit|create|delete)' .claude/bin/super-board-status.py` — should return nothing.
 
 The rest of this document is the format spec the script implements. Read it
 only when (a) the script is missing and you need to hand-render, or (b) you're
