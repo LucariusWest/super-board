@@ -245,6 +245,14 @@ for line in (manifest or "").splitlines():
 
     if dm := DISPATCH_RE.search(rest):
         lane, issue, pid, attempt = dm.groups()
+        # Clean lane handoffs (Build → QA → Review) don't emit reap/zombie
+        # lines, so the prior lane's inflight entry would otherwise linger and
+        # render as a phantom concurrent worker. A fresh dispatch into a later
+        # lane for the same issue is proof the earlier lane finished — drop it.
+        LANE_ORDER = ("build", "qa", "review")
+        for prior in LANE_ORDER[: LANE_ORDER.index(lane)]:
+            if inflight.get(prior, {}).get("issue") == issue:
+                del inflight[prior]
         inflight[lane] = {"pid": pid, "issue": issue, "attempt": attempt, "ts": hms}
         glyph = {"build": "🔨", "qa": "🔍", "review": "✏️"}[lane]
         target = {"build": "Building", "qa": "QA", "review": "Review"}[lane]
