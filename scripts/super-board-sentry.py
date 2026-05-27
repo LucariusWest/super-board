@@ -103,7 +103,7 @@ def gh(*args: str) -> tuple[bool, str]:
     """Run gh and return (ok, stdout)."""
     try:
         proc = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, check=False
+            ["gh", *args], capture_output=True, text=True, encoding="utf-8", check=False
         )
     except FileNotFoundError:
         return False, ""
@@ -603,7 +603,7 @@ if hb_due:
     try:
         out = subprocess.run(
             [sys.executable, str(status_script), CONFIG_SLUG],
-            capture_output=True, text=True, timeout=30, check=False,
+            capture_output=True, text=True, encoding="utf-8", timeout=30, check=False,
         )
         if out.returncode == 0:
             print(out.stdout.rstrip())
