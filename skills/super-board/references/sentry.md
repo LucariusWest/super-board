@@ -73,8 +73,9 @@ Run an `AskUserQuestion` flow with TWO questions (in one call):
 
 - "Mirror sentry alerts to Telegram?" → `Yes` / `No`
 - "Which alert types should fan out to Telegram?" (multi-select) →
-  `MERGED`, `BLOCKED`, `DISPATCH`, `REAP`, `BLOCK-RATE`,
-  `RUN-START-STOP`. Only ask this if the first answer is `Yes`.
+  `MERGED`, `BLOCKED`, `DISPATCH`, `REAP`, `ZOMBIE`, `BLOCK-RATE`,
+  `DONE`, `SKIPPED`, `RUN-START-STOP`. Only ask this if the first answer
+  is `Yes`.
 
 Persist the answers into the active config under a new `sentry` block:
 
@@ -88,7 +89,9 @@ Persist the answers into the active config under a new `sentry` block:
 
 Use `jq` to merge — do not rewrite the whole file. Lowercase the alert
 keys (the script matches them lowercase): `merged`, `blocked`, `dispatch`,
-`reap`, `block-rate`, `run-start-stop`.
+`reap`, `zombie`, `block-rate`, `done`, `skipped`, `run-start-stop`. Any
+key not in this list will never fan out — keep this set in sync with the
+`tg_key` returns inside `render_event` in `super-board-sentry.py`.
 
 **Step 2 — baseline status snapshot (EVERY entry, not just first-run):**
 
@@ -132,9 +135,13 @@ orchestrator on each tick:
 2. Runs `python .claude/bin/super-board-sentry.py <slug>`.
 3. Parses stdout line-by-line:
    - Lines starting with `TELEGRAM:<event_key>:<message>` — strip the
-     prefix, post the message via `mcp__plugin_telegram_telegram__reply`
-     to the configured Telegram channel. Do NOT print these to the user
-     terminal.
+     prefix, **un-escape `\n` back to real newlines** (the script escapes
+     them so each Telegram payload fits on one line of the output
+     protocol), then post the message via
+     `mcp__plugin_telegram_telegram__reply` to the configured Telegram
+     channel. Do NOT print these to the user terminal. The MERGED alert
+     in particular relies on this — its payload is `title\nPR url`, and
+     skipping the unescape will land a literal `\n` in the chat.
    - Line starting with `__NEXT_TICK_SECONDS__:<N>` — capture `<N>` for
      the next `ScheduleWakeup` delay. Do NOT print.
    - All other lines — print verbatim, in order.

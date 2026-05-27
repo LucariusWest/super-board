@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import re
 import subprocess
 import sys
@@ -41,6 +42,11 @@ import time
 import unicodedata
 from pathlib import Path
 from typing import Any
+
+# Cap on `seen_merged_prs` retention. `gh pr list --limit 10` only returns
+# the 10 most-recent merges, so anything beyond ~50 is dead weight — keeping
+# the file from growing unboundedly over months of operation.
+SEEN_MERGED_RETAIN = 50
 
 # Make box-drawing chars render on Windows consoles too.
 try:
@@ -172,7 +178,15 @@ if gh_ok:
         try:
             merged_raw = json.loads(prs_stdout) or []
         except json.JSONDecodeError:
-            merged_raw = []
+            # Treat as a soft failure — JSON corruption means the call
+            # technically returned but we got nothing usable. Roll it into
+            # the same failure-streak so an extended outage still alerts.
+            gh_ok = False
+    else:
+        # `gh pr list` is the only other gh call this tick. Without folding
+        # its failure into `gh_ok`, a persistent REST outage with a healthy
+        # GraphQL endpoint would never trip the gh-down alert.
+        gh_ok = False
 
 
 # ───────────────────────────── manifest read ─────────────────────────────
@@ -555,7 +569,13 @@ tg_alerts = set((cfg.get("sentry", {}) or {}).get("telegram_alerts", []) or [])
 
 
 def persist_state(new_state: dict[str, Any]) -> None:
-    STATE_FILE.write_text(json.dumps(new_state, indent=2))
+    # Atomic write: a Ctrl-C between `write_text` start and finish would
+    # leave the JSON half-flushed and unparseable on next start. tempfile +
+    # `os.replace` keeps the visible file either fully old or fully new.
+    # Same-directory rename is atomic on POSIX and Windows.
+    tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+    tmp.write_text(json.dumps(new_state, indent=2))
+    os.replace(tmp, STATE_FILE)
 
 
 if first_run:
@@ -569,7 +589,7 @@ if first_run:
         "last_column_state": current_column_state,
         "last_heartbeat_at": now_iso,
         "last_tick_at": now_iso,
-        "seen_merged_prs": sorted(seen_merged),
+        "seen_merged_prs": sorted(seen_merged)[-SEEN_MERGED_RETAIN:],
         "gh_failure_streak": gh_fail_streak,
     })
     print(f"__NEXT_TICK_SECONDS__:{TICK_MIN * 60}")
@@ -624,7 +644,7 @@ persist_state({
     "last_column_state": current_column_state,
     "last_heartbeat_at": new_heartbeat_at,
     "last_tick_at": now_iso,
-    "seen_merged_prs": sorted(seen_merged),
+    "seen_merged_prs": sorted(seen_merged)[-SEEN_MERGED_RETAIN:],
     "gh_failure_streak": gh_fail_streak,
 })
 

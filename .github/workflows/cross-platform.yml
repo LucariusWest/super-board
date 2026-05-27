@@ -61,3 +61,33 @@ jobs:
       # what the dispatcher actually emits.
       - name: status — parser fixture tests
         run: python tests/test_status_parse.py
+
+      # Step 4 — same syntax check for the sentry script. It shares the
+      # status renderer's cross-platform constraints (pure stdlib + `gh`)
+      # and is invoked from the same Claude session, so a syntax regression
+      # would silently break the sentry loop on the next tick.
+      - name: compile super-board-sentry
+        run: python -m py_compile scripts/super-board-sentry.py
+
+      # Step 5 — same no-config exit-64 contract as status. Both verbs
+      # share the "missing config + no active marker + no single config"
+      # branch and must behave identically.
+      - name: sentry — no-config path exits 64
+        shell: bash
+        run: |
+          set +e
+          python scripts/super-board-sentry.py
+          ec=$?
+          set -e
+          if [ "$ec" -ne 64 ]; then
+            echo "::error::Expected exit 64 (no config), got $ec"
+            exit 1
+          fi
+          echo "OK: super-board-sentry.py exited 64 as documented"
+
+      # Step 6 — pin the sentry script's persistence invariants and the
+      # menu↔tg_key sync between the script and references/sentry.md.
+      # Drift here is silent in production (Telegram fan-out becomes a
+      # no-op, state file grows unboundedly) — this test makes it loud.
+      - name: sentry — persistence + menu-sync tests
+        run: python tests/test_sentry_persist.py
