@@ -28,3 +28,5 @@ docs/super-board/runs/**/*.diff
 docs/super-board/runs/**/*.zip
 docs/super-board/runs/**/*.trace
 docs/super-board/runs/**/*.trace.zip
+__pycache__/
+*.pyc

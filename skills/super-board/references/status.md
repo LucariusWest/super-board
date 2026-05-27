@@ -10,9 +10,43 @@
 
 ## ⚡ Fast path — prefer this
 
-If `.claude/bin/super-board-status.py` exists, **run it and print stdout
-verbatim**. Skip everything below in this file — the script implements
-the locked template defined here.
+If `.claude/bin/super-board-status.py` exists:
+
+1. **Run it.**
+2. **Print its stdout verbatim, inside a single fenced code block.**
+3. **Stop.** Do not write anything before or after the code block.
+
+Skip everything below in this file — the script implements the locked
+template defined here.
+
+```bash
+python .claude/bin/super-board-status.py                # sole-config or active marker
+python .claude/bin/super-board-status.py <config-slug>  # multi-project repo
+```
+
+### Do NOT, under any circumstances:
+
+- **Do not** summarize, paraphrase, condense, or rewrite the output.
+- **Do not** add a `TL;DR`, `Summary`, intro, outro, or any prose around it.
+- **Do not** collapse empty lanes onto one line (e.g. don't merge
+  `Building [0]`, `QA [0]`, `Review [0]` into one row). Each lane is its
+  own multi-line box; preserve every line and every newline as-is.
+- **Do not** merge `Blocked` and `Skipped` into one combined box.
+- **Do not** strip the `▎Workers` / `▎Block reasons` / `▎Recent` / `▎Health`
+  section headers, or fold them into the kanban box stack.
+- **Do not** re-render the box-drawing characters, "fix" alignment, or
+  "improve" the layout in any way.
+- **Do not** add markdown links, bold, or other styling inside the code
+  block. Issue numbers stay as plain `#NNN`.
+
+The user chose the rich 80-column template deliberately. Compressing it
+back into a chat-friendly summary defeats the entire point of having the
+script. If the output looks long, that **is** the correct length — print
+it anyway and trust the user to scroll. The ≈150× speedup claim assumes
+the agent does no rendering work post-script; summarizing forfeits part
+of that win and gives the user the wrong layout.
+
+### Background
 
 This file defines a richer status template than the one super-board
 originally shipped with: a fixed 80-column Kanban plus dedicated
@@ -22,15 +56,11 @@ the Python script renders the same template in ≈1.3 s (≈150× faster),
 so the richer view stays usable in practice. Pure Python 3 stdlib +
 `gh` CLI; no `jq`, no bash — runs on macOS, Linux, and Windows alike.
 
-```bash
-python .claude/bin/super-board-status.py                # sole-config or active marker
-python .claude/bin/super-board-status.py <config-slug>  # multi-project repo
-```
-
 Exit codes the orchestrator should respect:
 
 - `0` — printed snapshot, done.
-- `64` — no config-slug arg and ambiguous configs; ask the user which.
+- `64` — no config-slug arg and ambiguous configs, or invalid slug (path
+  traversal); ask the user which / for a valid slug.
 - `66` — config not found.
 - `67` — `gh` / network failure; surface the stderr line and stop.
 
@@ -151,8 +181,6 @@ mode:   auto-merge                 truth gate: non-trivial (≥70)
 
 ▎Health
    last tick: 93s ago    run started: 67m ago    workers: 2/3    worktrees cleaned: 5
-
-   – tip · /super-board sentry for live alerts and a 15-min heartbeat
 ```
 
 ---
@@ -330,9 +358,9 @@ belong in the manifest, not the snapshot.
 
 ## Implementation hints (authored — NOT in spec)
 
-These notes guide the worker that executes `status`. They are derived from the
-spec but the spec itself does not prescribe the mechanics; treat them as
-guidance, not contract.
+These notes describe the data flow that `super-board-status.py` implements.
+They also apply if you need to hand-render via the model-render fallback when
+the script is missing.
 
 - **Active config resolution:** load
   `.claude/super-board/configs/<slug>.json` for the resolved project slug.
@@ -343,17 +371,20 @@ guidance, not contract.
   own login when running in user-account mode. If `notifications.bot_identity`
   is absent, fall back to scanning for any assignee that matches the
   configured identity (e.g. `claim.assignee_login`).
-- **Column counts:** use the read-only GitHub Projects v2 API via
-  `gh project item-list <project-number> --owner <owner> --format json --limit 500`,
-  then group by the `Status` field locally. Do **not** call
-  `gh project item-edit` or any mutation in this verb.
-- **In-flight workers:** list issues assigned to the claim assignee with
-  `gh issue list --assignee <login> --state open --json number,title,assignees,labels,updatedAt`,
-  then bucket by lane via the `loop:in-{builder,tester,reviewer}` label.
-  The `loop:rebuild-N` label feeds the `↻ N/3` suffix.
+- **Project items (column counts + in-flight workers, both from ONE call):**
+  the script issues a single targeted `gh api graphql` query (`ITEMS_QUERY`
+  near the top of `super-board-status.py`) that fetches each item's `number`,
+  `title`, `labels{nodes{name}}`, and the `Status` single-select field —
+  ≈3 KB total. Group locally by Status for column counts; filter the same
+  `labels` array for `loop:in-{builder,tester,reviewer}` to identify
+  in-flight workers per lane; `loop:rebuild-N` feeds the `↻ N/3` suffix.
+  Deliberately avoids `gh project item-list --format json` (≈100 KB — it
+  slurps every issue body) and any separate `gh issue list --assignee` call.
+  Do **not** call `gh project item-edit` or any mutation in this verb.
 - **Block-reason parsing:** for each issue in `Blocked` or `Skipped`, read the
-  latest §4 reason-tag comment on the issue and match the leading emoji
-  against §I. Cache results during the snapshot — do not re-read mid-render.
+  latest §4 reason-tag comment via `gh issue view <N> --json comments` and
+  match the leading emoji against §I. Cache results during the snapshot — do
+  not re-read mid-render.
 - **Recent events:** tail the most recent run manifest at
   `docs/super-board/runs/<YYYY-MM-DD>-<slug>.md`. Filter to state-transition
   lines (§G); skip `tick —` lines. Take the last 5 after filtering.
@@ -364,7 +395,7 @@ guidance, not contract.
   - `Run started` — most recent `super-board run started` line in today's
     manifest. If absent or followed by `exiting cleanly`, see §H.
   - `Active worker count` — derived from in-flight scan above, capped at
-    `config.parallelism.max_concurrent_workers`.
+    `config.max_workers` (top-level, defaults to 3).
 
 ---
 
@@ -381,12 +412,15 @@ Same rules as §4 config discovery:
 
 ---
 
-## Worker self-check (MANDATORY before exit)
+## Read-only contract — enforced on both rendering paths
 
-Before returning, the worker MUST confirm that no `gh` invocation issued by
-this verb belongs to the mutation set below. If any forbidden call was made,
-**halt immediately** and report a contract violation; do not print the
-snapshot.
+When `super-board-status.py` runs, this contract is enforced by inspection:
+the script issues no `gh` mutations (see the `grep` verification command in
+the Fast-path block above). When the model-render fallback executes instead,
+the model MUST confirm before printing the snapshot that no `gh` invocation
+it issued belongs to the mutation set below. Either way, if any forbidden
+call was made, **halt immediately** and report a contract violation; do not
+print the snapshot.
 
 Forbidden in `status`:
 
