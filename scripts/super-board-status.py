@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """super-board-status.py — read-only live snapshot of the super-board pipeline.
 
-Replaces the model-rendered status path in
-`.claude/skills/super-board/references/status.md`. Same output, much faster
-because rendering moves from token-by-token generation into a single Python
-process (no Anthropic round-trip on the box-drawing).
+Renders the richer status template defined in
+`.claude/skills/super-board/references/status.md` (fixed 80-col Kanban
+plus dedicated Workers / Block-reasons / Recent / Health sections).
+
+The same template can be hand-rendered by the model — but the token-by-
+token box-drawing takes ≈3 min per invocation, which makes the richer
+view impractical in practice. This script renders it in ≈1.3 s by doing
+the layout as a single Python pass.
 
 What it does:
   1. Resolve config slug: arg | `.claude/super-board/active` | sole config.

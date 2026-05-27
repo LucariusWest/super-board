@@ -10,13 +10,17 @@
 
 ## ⚡ Fast path — prefer this
 
-If `.claude/bin/super-board-status.py` exists (installed by `install.sh`,
-added 2026-05-26 to fix the multi-minute model-render path), **run it and
-print stdout verbatim**. Skip everything below in this file — the script
-implements the same locked template, just ~150× faster (≈1.3 s vs. ≈3 min)
-because rendering is a single Python pass instead of token-by-token model
-generation. Pure Python 3 stdlib + `gh` CLI; no `jq`, no bash — runs on
-macOS, Linux, and Windows alike.
+If `.claude/bin/super-board-status.py` exists, **run it and print stdout
+verbatim**. Skip everything below in this file — the script implements
+the locked template defined here.
+
+This file defines a richer status template than the one super-board
+originally shipped with: a fixed 80-column Kanban plus dedicated
+`▎Workers`, `▎Block reasons`, `▎Recent`, and `▎Health` sections.
+Model-rendering all of that token-by-token takes ≈3 min per invocation;
+the Python script renders the same template in ≈1.3 s (≈150× faster),
+so the richer view stays usable in practice. Pure Python 3 stdlib +
+`gh` CLI; no `jq`, no bash — runs on macOS, Linux, and Windows alike.
 
 ```bash
 python .claude/bin/super-board-status.py                # sole-config or active marker
