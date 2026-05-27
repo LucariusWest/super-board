@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
 import re
 import subprocess
 import sys
@@ -54,6 +53,16 @@ try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 except Exception:
     pass
+
+
+# ───────────────────────────── lane constants ─────────────────────────────
+# Used by dispatch parsing, kanban glyph lookup, and the workers section.
+# Source of truth — never inline these as dict literals at call sites.
+
+LANE_ORDER: tuple[str, ...] = ("build", "qa", "review")
+LANE_GLYPH = {"build": "🔨", "qa": "🔍", "review": "✏️"}
+LANE_LABEL = {"build": "Building", "qa": "QA", "review": "Review"}
+LANE_ROLE = {"build": "Builder ", "qa": "Tester  ", "review": "Reviewer"}
 
 
 # ───────────────────────────── args + paths ─────────────────────────────
@@ -214,7 +223,7 @@ def hms_to_epoch(hms: str) -> int:
     try:
         dt = datetime.datetime.strptime(f"{TODAY} {hms}", "%Y-%m-%d %H:%M:%S")
         return int(dt.timestamp())
-    except Exception:
+    except ValueError:
         return 0
 
 
@@ -253,13 +262,12 @@ for line in (manifest or "").splitlines():
         # lines, so the prior lane's inflight entry would otherwise linger and
         # render as a phantom concurrent worker. A fresh dispatch into a later
         # lane for the same issue is proof the earlier lane finished — drop it.
-        LANE_ORDER = ("build", "qa", "review")
         for prior in LANE_ORDER[: LANE_ORDER.index(lane)]:
             if inflight.get(prior, {}).get("issue") == issue:
                 del inflight[prior]
         inflight[lane] = {"pid": pid, "issue": issue, "attempt": attempt, "ts": hms}
-        glyph = {"build": "🔨", "qa": "🔍", "review": "✏️"}[lane]
-        target = {"build": "Building", "qa": "QA", "review": "Review"}[lane]
+        glyph = LANE_GLYPH[lane]
+        target = LANE_LABEL[lane]
         recents.append({
             "epoch": ep, "verb": "dispatch", "glyph": glyph,
             "issue": f"#{issue}", "target": target,
@@ -395,7 +403,7 @@ print()
 def glyph_for_issue(n: int) -> str:
     for lane, v in inflight.items():
         if v["issue"] == str(n):
-            return {"build": "🔨", "qa": "🔍", "review": "✏️"}[lane]
+            return LANE_GLYPH[lane]
     return "  "
 
 
@@ -503,11 +511,10 @@ else:
     if active == 0:
         print("   (idle)")
     else:
-        order = {"build": 0, "qa": 1, "review": 2}
-        for lane in sorted(inflight, key=lambda l: order.get(l, 9)):
+        for lane in sorted(inflight, key=LANE_ORDER.index):
             v = inflight[lane]
-            glyph = {"build": "🔨", "qa": "🔍", "review": "✏️"}[lane]
-            role = {"build": "Builder ", "qa": "Tester  ", "review": "Reviewer"}[lane]
+            glyph = LANE_GLYPH[lane]
+            role = LANE_ROLE[lane]
             item = next((i for i in items if i["number"] == int(v["issue"])), None)
             extras: list[str] = []
             if item:
